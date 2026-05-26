@@ -73,9 +73,8 @@ const riskyRegexes = Object.entries(riskyShortWords).map(([en, zh]) => {
 function backupFile(filePath) {
     const backupPath = filePath + '.backup';
     if (fs.existsSync(backupPath)) {
-        // 已有备份 → 从备份还原到干净状态
-        fs.copyFileSync(backupPath, filePath);
-        return '🧹 已还原干净的原版文件 ———— 正在洗牌';
+        // 已有备份 → 保留当前文件，避免重复汉化时覆盖现有补丁
+        return '🧩 已发现原版备份，保留当前文件继续汉化';
     } else if (fs.existsSync(filePath)) {
         // 首次运行 → 创建备份
         fs.copyFileSync(filePath, backupPath);
@@ -379,10 +378,55 @@ function translate(paths) {
         jsContent = jsContent.replace(regex, zh);
     });
 
-    // 设置侧栏 Tab 项（不可走 riskyShortWords，否则会误伤键盘扫描表）
-    printJoke();
-    jsContent = jsContent.split('tab:"Tab"').join('tab:"Tab 补全"');
+    // 5.1 设置侧边栏映射与部分编译模板片段
+    const scopedReplacements = [
+        ['general:"General"', 'general:"通用"'],
+        ['appearance:"Appearance"', 'appearance:"外观"'],
+        ['chat:"Agents"', 'chat:"智能体"'],
+        ['tab:"Tab"', 'tab:"Tab 补全"'],
+        ['models:"Models"', 'models:"模型"'],
+        ['mcp:"Tools & MCPs"', 'mcp:"工具与 MCP"'],
+        ['hooks:"Hooks"', 'hooks:"钩子"'],
+        ['beta:"Beta"', 'beta:"测试功能"'],
+        ['network:"Network"', 'network:"网络"'],
+        ['worktrees:"Worktrees"', 'worktrees:"工作树"'],
+        ['n.isGlass?"Indexing":"索引与文档"', 'n.isGlass?"索引":"索引与文档"'],
+        ['<div><span>Subagents', '<div><span>子智能体'],
+        ['<div><div title="Choose Explore subagent model"', '<div><div title="选择探索子智能体模型"'],
+        ['<div><div title="Choose 探索子智能体模型"', '<div><div title="选择探索子智能体模型"'],
+        ['aria-label="Max Mode required"', 'aria-label="需要 Max 模式"'],
+        ['SAS="Subagent model overrides will only be used in Max Mode"', 'SAS="子智能体模型覆盖仅会在 Max 模式中使用"'],
+        ['label:"Reset to default"', 'label:"重置为默认值"'],
+        ['label:"Disable",labelOutsidePicker:"Disabled"', 'label:"禁用",labelOutsidePicker:"已禁用"'],
+        ['label:"Inherit from parent"', 'label:"继承父级设置"'],
+        ['label:"Auto-Run in Sandbox"', 'label:"在沙盒中自动运行"'],
+        ['label:"Run Everything (Unsandboxed)"', 'label:"运行所有（非沙盒）"'],
+        ['return"Auto-Run in Sandbox"', 'return"在沙盒中自动运行"'],
+        ['return"Run Everything (Unsandboxed)"', 'return"运行所有（非沙盒）"'],
+        ['return"Ask for permission before running each operation"', 'return"每次操作前请求许可"'],
+        ['return"Automatically run operations after you approve them once"', 'return"在您批准一次后自动运行操作"'],
+        ['return"Automatically run all operations without asking for permission"', 'return"无需请求许可，自动运行所有操作"'],
+        ['return e?"Tools will auto-run in a sandbox if possible, otherwise respect the allowlist or ask for approval"', 'return e?"工具会尽可能在沙盒中自动运行，否则遵循白名单或请求批准"'],
+        ['label:"sandbox.json Only"', 'label:"仅 sandbox.json"'],
+        ['label:"sandbox.json + Defaults"', 'label:"sandbox.json + 默认值"'],
+        ['label:"Allow All"', 'label:"全部允许"'],
+        ['return"sandbox.json + Defaults"', 'return"sandbox.json + 默认值"'],
+        ['?"Sandboxed network access is disabled by your admin.":"Sandboxed network access is controlled by your admin. You can still edit allowed/denied domains in sandbox.json in your workspace, but admin policy takes precedence."', '?"沙盒网络访问已被管理员禁用。":"沙盒网络访问由管理员控制。您仍可在工作区的 sandbox.json 中编辑允许或拒绝的域名，但管理员策略优先。"'],
+        ['label:"Smart Allowlist"', 'label:"智能白名单"'],
+        ['description:"Use AI-powered command classification to intelligently match commands against allowlist patterns and suggest sandbox modes"', 'description:"使用 AI 命令分类智能匹配白名单模式并建议沙盒模式"'],
+        ['<strong>Deprecated Feature:</strong> The command denylist is often bypassable, providing a false sense of security. Consider using the allowlist approach instead for better security.', '<strong>已弃用功能：</strong>命令拒绝列表经常可被绕过，会造成虚假的安全感。建议改用白名单方式以获得更好的安全性。'],
+        ['"aria-label":"Select model count"', '"aria-label":"选择模型数量"'],
+    ];
 
+    scopedReplacements.forEach(([en, zh]) => {
+        printJoke();
+        jsContent = jsContent.split(en).join(zh);
+    });
+
+    jsContent = jsContent.replace(
+        /`\$\{d\.length\} worktree\$\{d\.length===1\?"":"s"\}`/g,
+        '`${d.length} 个工作树`'
+    );
     // jsContent = jsContent.split('"Reset \\"Don\'t Ask Again\\" Dialogs"').join('"重置\\"不再询问\\"弹窗"');
     // jsContent = jsContent.split("'Reset \"Don\\'t Ask Again\" Dialogs'").join("'重置\"不再询问\"弹窗'");
     // jsContent = jsContent.split('label:\'Reset "Don\\u2019t Ask Again" Dialogs\'').join('label:\'重置“不再询问”弹窗\'');
