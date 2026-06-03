@@ -105,8 +105,58 @@ function detectHashAlgo(hash) {
     return 'sha256';
 }
 
-function fixProductHash(mainJsPath, productJsonPath) {
-    const updatedContent = fs.readFileSync(mainJsPath);
+/**
+ * 安全写回大文件：优先临时文件替换；失败时回退为直接覆盖（兼容 Program Files 下文件被占用）
+ */
+function writeFileSafe(filePath, content, encoding = 'utf8') {
+    const dir = path.dirname(filePath);
+    const tmpPath = path.join(dir, `.cursor-i18n-${path.basename(filePath)}.${process.pid}.tmp`);
+
+    const verifyExists = () => {
+        if (!fs.existsSync(filePath)) {
+            throw new Error(`写入后无法找到文件: ${filePath}`);
+        }
+    };
+
+    const cleanupTmp = () => {
+        try {
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } catch {
+            // ignore
+        }
+    };
+
+    try {
+        fs.writeFileSync(tmpPath, content, encoding);
+        try {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            fs.renameSync(tmpPath, filePath);
+            verifyExists();
+            return;
+        } catch {
+            cleanupTmp();
+        }
+    } catch {
+        cleanupTmp();
+    }
+
+    fs.writeFileSync(filePath, content, encoding);
+    verifyExists();
+}
+
+/**
+ * 使用内存中的文件内容更新 product.json 校验值（避免写回后立刻读盘失败）
+ * @param {string | Buffer} fileContent
+ */
+function fixProductHash(fileContent, productJsonPath) {
+    const contentBuffer = Buffer.isBuffer(fileContent)
+        ? fileContent
+        : Buffer.from(fileContent, 'utf8');
+
+    if (!fs.existsSync(productJsonPath)) {
+        throw new Error(`找不到 product.json: ${productJsonPath}`);
+    }
+
     const productJson = JSON.parse(fs.readFileSync(productJsonPath, 'utf8'));
     let hashUpdated = false;
 
@@ -116,7 +166,7 @@ function fixProductHash(mainJsPath, productJsonPath) {
                 const oldHash = productJson.checksums[key];
                 const algo = detectHashAlgo(oldHash);
                 const newHash = crypto.createHash(algo)
-                    .update(updatedContent)
+                    .update(contentBuffer)
                     .digest('base64')
                     .replace(/=+$/, '');
                 productJson.checksums[key] = newHash;
@@ -127,7 +177,7 @@ function fixProductHash(mainJsPath, productJsonPath) {
     }
 
     if (hashUpdated) {
-        fs.writeFileSync(productJsonPath, JSON.stringify(productJson, null, '\t'), 'utf8');
+        writeFileSafe(productJsonPath, JSON.stringify(productJson, null, '\t'), 'utf8');
     }
     return hashUpdated;
 }
@@ -451,13 +501,22 @@ function translate(paths) {
 
     process.stdout.write('\n'); // 收尾换行
 
-    // 7. 写回
-    fs.writeFileSync(mainJsPath, jsContent, 'utf8');
+    // 7. 写回（Program Files 等目录下避免写后立刻读盘失败）
+    try {
+        writeFileSafe(mainJsPath, jsContent, 'utf8');
+    } catch (err) {
+        if (err.code === 'EACCES' || err.code === 'EPERM') {
+            throw new Error(
+                `无法写入 ${mainJsPath}：权限不足。请关闭 Cursor 后以管理员身份运行本工具，或将 Cursor 安装到用户目录。`
+            );
+        }
+        throw err;
+    }
     console.log('✅ 核心 JS 文件智能汉化完成！');
 
-    // 8. 修复 Hash
+    // 8. 修复 Hash（使用内存内容，不依赖写回后再次打开主 JS）
     console.log('\n🛠️  正在重新计算指纹并修复文件完整性...');
-    const hashFixed = fixProductHash(mainJsPath, productJsonPath);
+    const hashFixed = fixProductHash(jsContent, productJsonPath);
     if (hashFixed) {
         console.log('✅ 已更新 product.json 校验值，消除「安装已损坏」警告。');
     } else {
