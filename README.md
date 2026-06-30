@@ -7,16 +7,18 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D16-green?logo=node.js)](https://nodejs.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-blue)](#)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](./LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.1.0-orange)](./package.json)
+[![Version](https://img.shields.io/badge/Version-1.2.0-orange)](./package.json)
 
 </div>
 
-> 本仓库是 [Wuyf5275/cursor-i18n-tool](https://github.com/Wuyf5275/cursor-i18n-tool) 的 Fork（[@Caph-dev](https://github.com/Caph-dev/cursor-i18n-tool)）。在 upstream 基础上扩展了词典，并修复了 Tab 键位被误汉化的问题。
+> 本仓库是 [Wuyf5275/cursor-i18n-tool](https://github.com/Wuyf5275/cursor-i18n-tool) 的 Fork（[@Caph-dev](https://github.com/Caph-dev/cursor-i18n-tool)）。在 upstream 基础上扩展了词典、修复了 Tab 键位误汉化问题，并增加了安装路径自定义等功能。
 
 ## 功能
 
 - **一键汉化**：自动替换 Cursor 核心 JS 中的 UI 文案。
 - **一键还原**：随时恢复英文原版，干净可逆。
+- **智能定位安装路径**：自动搜索 Cursor 安装目录，支持手动指定与多版本选择。
+- **路径记忆**：上次使用的安装路径保存到用户配置，下次自动沿用。
 - **完整性修复**：自动重算 `workbench.desktop.main.js` 哈希，消除「安装已损坏」警告。
 - **macOS 适配**：自动清除隔离属性并本地重签名，无需手动执行 `xattr`。
 - **权限处理**：权限不足时自动请求管理员权限。
@@ -61,15 +63,39 @@ npm install
 node index.js
 ```
 
+### 指定 Cursor 安装路径
+
+若 Cursor 安装在非默认位置（例如 `D:\Program Files\cursor\`），启动时可：
+
+- 在交互菜单中选择「手动指定其他路径」或「重新自动搜索」。
+- 使用命令行参数 `--cursor-path`（支持安装根目录、`resources/app`、`Cursor.exe` 或 macOS 的 `Cursor.app`）。
+
+配置会保存到 `~/.cursor-i18n-tool/config.json`。
+
+**自动搜索范围摘要：**
+
+| 平台 | 默认探测位置 |
+|------|--------------|
+| Windows | `%LOCALAPPDATA%\Programs\cursor`、Program Files、注册表 `InstallLocation` |
+| macOS | `/Applications/Cursor.app`、`~/Applications/Cursor.app` 及 `Cursor*.app` 扫描 |
+
 ### 命令行静默模式
 
 ```bash
 # 直接汉化
 node index.js --action=translate
 
+# 指定安装路径后汉化（路径含空格请加引号）
+node index.js --action=translate --cursor-path="D:\Program Files\cursor"
+
 # 恢复英文
 node index.js --action=restore
+
+# 指定路径后恢复
+node index.js --action=restore --cursor-path="D:\Program Files\cursor"
 ```
+
+提权后的子进程会携带 `--cursor-path`，无需再次选择路径。
 
 ## 项目结构
 
@@ -79,7 +105,7 @@ cursor-i18n-tool/
 ├── src/
 │   ├── i18n-core.js      # 核心引擎：正则替换 + 哈希修复 + Gatekeeper
 │   ├── dict.js           # 翻译词典
-│   └── platform.js       # 平台适配：路径探测 + 权限检测 + 提权
+│   └── platform.js       # 平台适配：路径探测/规范化/配置 + 权限检测 + 提权
 ├── package.json
 └── README.md
 ```
@@ -94,15 +120,17 @@ cursor-i18n-tool/
 | L2 安全长句 | `safeMegaRegex` | 被引号包裹的长句，按长度降序匹配 |
 | L3 裸文本长句 | `longMegaRegex` | ≥20 字符的裸文本，不与代码变量冲突 |
 | L4 危险短词 | `riskyRegexes` | 仅在 `children:`、`title:` 等 UI 属性上下文中替换；键位扫描表附近自动跳过 |
-| L4.5 作用域替换 | `scopedReplacements` | 设置侧栏 ID、编译后模板片段等 `dict` 无法覆盖的文案 |
+| L4.5 作用域替换 | `scopedReplacements` | 设置侧栏 ID、编译模板中的固定片段等 `dict` 无法覆盖的文案 |
 
 ### 文件完整性修复
 
 Cursor 启动时会校验核心文件哈希。修改后工具会：
 
-1. 读取修改后的 `workbench.desktop.main.js`。
+1. 使用内存中已汉化的 `workbench.desktop.main.js` 内容计算校验值，避免写回后立刻读盘失败（尤其在 `Program Files` 等系统目录）。
 2. 重新计算哈希（自动检测 MD5/SHA256/SHA512）。
 3. 更新 `product.json` 中对应的校验值。
+
+核心 JS 写回采用「临时文件替换 + 直接覆盖回退」，在文件被占用时尽量保持可写行为。
 
 ### macOS Gatekeeper 处理
 
@@ -132,11 +160,13 @@ npm run build:mac
 
 | 项目 | upstream `main` | 本 Fork |
 |------|-----------------|---------|
-| 版本 | 1.0.0 | 1.1.0 |
+| 版本 | 1.0.0 | 1.2.0 |
 | Tab 键位修复 | 否 | 是 |
 | 设置页词典扩充 | 基础 | 扩展 |
 | `scopedReplacements` | 否 | 是 |
 | 键位上下文保护 | 否 | 是 |
+| 自定义安装路径 | 否 | 是 |
+| 路径配置记忆 | 否 | 是 |
 
 同步上游更新：
 
@@ -177,7 +207,9 @@ git merge upstream/main
 - Cursor 每次更新后需重新运行汉化，更新会覆盖已修改的文件。
 - 工具会自动备份原文件（`.backup` 后缀），可随时还原。
 - 部分由服务器动态下发的文案无法通过本工具翻译。
-- 建议在汉化前关闭 Cursor 编辑器。
+- 汉化前请完全退出 Cursor（含系统托盘），避免文件占用。
+- 安装在 `Program Files` 等系统目录时，若提示权限不足，请以管理员身份运行本工具。
+- 写回失败或界面异常时，可尝试恢复英文或重装 Cursor 后再汉化。
 
 ## 开源许可
 
